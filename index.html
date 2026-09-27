@@ -1,50 +1,223 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EGU WebRTC Stream</title>
-  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>EGU Remote Control</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0e1117; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
-    #video-container { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
-    video { max-width: 100%; max-height: 100%; border-radius: 8px; background: #000; }
-    .status { position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 20px; font-size: 14px; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+    body {
+      background-color: #0e0e12;
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    #status-bar {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      background: rgba(20, 20, 30, 0.85);
+      backdrop-filter: blur(8px);
+      padding: 10px 16px;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+      z-index: 10;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .controls {
+      display: flex;
+      gap: 8px;
+    }
+    input {
+      background: #1e1e2d;
+      border: 1px solid #3d3d5c;
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+    }
+    button {
+      background: #4f46e5;
+      color: white;
+      border: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #4338ca;
+    }
+    #viewport-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    video {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      cursor: crosshair;
+    }
   </style>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
 <body>
 
-  <div class="status" id="status">Connecting to Signaling Server...</div>
+  <div id="status-bar">
+    <div id="status-text">Initializing PeerJS...</div>
+    <div class="controls">
+      <input type="text" id="remote-id-input" placeholder="Enter Host Peer ID" />
+      <button id="connect-btn">Connect</button>
+      <button id="host-btn" style="background: #059669;">Host Screen</button>
+    </div>
+  </div>
 
-  <div id="video-container">
-    <video id="remote-video" autoplay playsinline muted></video>
+  <div id="viewport-container">
+    <video id="display-stream" autoplay playsinline muted></video>
   </div>
 
   <script>
-    const statusEl = document.getElementById('status');
-    const remoteVideo = document.getElementById('remote-video');
+    const statusText = document.getElementById('status-text');
+    const remoteIdInput = document.getElementById('remote-id-input');
+    const connectBtn = document.getElementById('connect-btn');
+    const hostBtn = document.getElementById('host-btn');
+    const displayVideo = document.getElementById('display-stream');
 
-    // Connect to PeerJS cloud server (Free peer matching)
-    const peer = new Peer('egu-host-pc-stream'); 
+    const peer = new Peer();
+    let activeDataConn = null;
 
+    // 1. Setup Peer
     peer.on('open', (id) => {
-      statusEl.innerText = 'Ready. Room ID: ' + id;
-    });
-
-    peer.on('call', (call) => {
-      statusEl.innerText = 'Receiving stream...';
-      call.answer(); // Answer incoming call
-      call.on('stream', (remoteStream) => {
-        remoteVideo.srcObject = remoteStream;
-        statusEl.innerText = 'Streaming Live (WebRTC P2P)';
-      });
+      statusText.innerText = `My ID: ${id}`;
+      console.log('My Peer ID:', id);
     });
 
     peer.on('error', (err) => {
-      console.error(err);
-      statusEl.innerText = 'Error: ' + err.type;
+      console.error('PeerJS Error:', err);
+      statusText.innerText = `Error: ${err.type}`;
     });
+
+    // 2. User Mode: Connect to Host
+    connectBtn.addEventListener('click', () => {
+      const hostId = remoteIdInput.value.trim();
+      if (!hostId) return alert('Please enter a Host Peer ID');
+
+      statusText.innerText = 'Connecting to host...';
+      
+      // Establish data channel for controlling host
+      activeDataConn = peer.connect(hostId);
+      
+      activeDataConn.on('open', () => {
+        statusText.innerText = 'Connected! Receiving video...';
+      });
+
+      // Receive media stream call from host
+      peer.on('call', (call) => {
+        call.answer();
+        call.on('stream', (remoteStream) => {
+          displayVideo.srcObject = remoteStream;
+        });
+      });
+    });
+
+    // 3. Send Controls (Click & Touch position calculation)
+    function sendControlEvent(type, event) {
+      if (!activeDataConn || !activeDataConn.open) return;
+
+      const rect = displayVideo.getBoundingClientRect();
+      const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+      const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+
+      // Normalize position (0.0 to 1.0) relative to actual video dimensions
+      const normX = (clientX - rect.left) / rect.width;
+      const normY = (clientY - rect.top) / rect.height;
+
+      if (normX >= 0 && normX <= 1 && normY >= 0 && normY <= 1) {
+        activeDataConn.send({
+          type: type,
+          x: normX,
+          y: normY
+        });
+      }
+    }
+
+    displayVideo.addEventListener('mousedown', (e) => sendControlEvent('click', e));
+    displayVideo.addEventListener('touchstart', (e) => sendControlEvent('click', e));
+
+    // Send keyboard events to host
+    window.addEventListener('keydown', (e) => {
+      if (!activeDataConn || !activeDataConn.open) return;
+      if (document.activeElement === remoteIdInput) return;
+      
+      activeDataConn.send({
+        type: 'keydown',
+        key: e.key,
+        code: e.code
+      });
+    });
+
+    // 4. Host Mode: Share Screen & Receive Control Data
+    hostBtn.addEventListener('click', async () => {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { cursor: "always" },
+          audio: false
+        });
+
+        displayVideo.srcObject = stream;
+        statusText.innerText = `Hosting Screen! Share ID: ${peer.id}`;
+
+        // Listen for incoming viewer control connections
+        peer.on('connection', (conn) => {
+          activeDataConn = conn;
+          statusText.innerText = 'Viewer connected!';
+
+          // Call the viewer back with the screen stream
+          peer.call(conn.peer, stream);
+
+          // Handle incoming controls from viewer
+          conn.on('data', (data) => {
+            console.log('Incoming Control Event:', data);
+            
+            // Forward commands to WebSocket server running on local node host.js
+            if (window.wsHostControl && window.wsHostControl.readyState === WebSocket.OPEN) {
+              window.wsHostControl.send(JSON.stringify(data));
+            }
+          });
+        });
+      } catch (err) {
+        console.error('Screen sharing failed:', err);
+        statusText.innerText = 'Screen share cancelled';
+      }
+    });
+
+    // Local host bridge connection (bridges PeerJS browser data to host.js system inputs)
+    try {
+      const ws = new WebSocket('ws://localhost:3000');
+      ws.onopen = () => console.log('Connected to local system control agent');
+      window.wsHostControl = ws;
+    } catch (e) {
+      // Viewer mode running on Vercel won't have localhost:3000 running, which is expected
+    }
   </script>
 </body>
 </html>
