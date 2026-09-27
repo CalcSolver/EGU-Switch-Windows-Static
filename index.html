@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EGU WebRTC Stream</title>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0e1117; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+    #video-container { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+    video { max-width: 100%; max-height: 100%; border-radius: 8px; background: #000; }
+    .status { position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 20px; font-size: 14px; }
+  </style>
+</head>
+<body>
+
+  <div class="status" id="status">Connecting to Signaling Server...</div>
+
+  <div id="video-container">
+    <video id="remote-video" autoplay playsinline muted></video>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const remoteVideo = document.getElementById('remote-video');
+
+    // Connect to PeerJS cloud server (Free peer matching)
+    const peer = new Peer('egu-host-pc-stream'); 
+
+    peer.on('open', (id) => {
+      statusEl.innerText = 'Ready. Room ID: ' + id;
+    });
+
+    peer.on('call', (call) => {
+      statusEl.innerText = 'Receiving stream...';
+      call.answer(); // Answer incoming call
+      call.on('stream', (remoteStream) => {
+        remoteVideo.srcObject = remoteStream;
+        statusEl.innerText = 'Streaming Live (WebRTC P2P)';
+      });
+    });
+
+    peer.on('error', (err) => {
+      console.error(err);
+      statusEl.innerText = 'Error: ' + err.type;
+    });
+  </script>
+</body>
+</html>
